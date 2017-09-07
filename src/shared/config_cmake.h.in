@@ -1,0 +1,77 @@
+//Defined if function "atexit" exists.
+#cmakedefine HAVE_ATEXIT
+
+//Defined if include file "fcntl.h" exists.
+#cmakedefine HAVE_FCNTL_H
+
+//Defined if include file "float.h" exists.
+#cmakedefine HAVE_FLOAT_H
+
+//Defined if include file "inttypes.h" exists.
+#cmakedefine HAVE_INTTYPES_H
+
+//Defined if include file "limits.h" exists.
+#cmakedefine HAVE_LIMITS_H
+
+//Defined if function "memmove" exists.
+#cmakedefine HAVE_MEMMOVE
+
+//Defined if include file "memory.h" exists.
+#cmakedefine HAVE_MEMORY_H
+
+//Defined if function "memset" exists.
+#cmakedefine HAVE_MEMSET
+
+//Defined if function "nanosleep" exists.
+#cmakedefine HAVE_NANOSLEEP
+
+//Defined if function "select" exists.
+#cmakedefine HAVE_SELECT
+
+//Defined if function "sqrt" exists.
+#cmakedefine HAVE_SQRT
+
+//Defined if include file "stdint.h" exists.
+#cmakedefine HAVE_STDINT_H
+
+//Defined if include file "stdlib.h" exists.
+#cmakedefine HAVE_STDLIB_H
+
+//Defined if function "strcasecmp" exists.
+#cmakedefine HAVE_STRCASECMP
+
+//Defined if function "strchr" exists.
+#cmakedefine HAVE_STRCHR
+
+//Defined if function "strup" exists.
+#cmakedefine HAVE_STRUP
+
+//Defined if function "strerror" exists.
+#cmakedefine HAVE_STRERROR
+
+//Defined if include file "strings.h" exists.
+#cmakedefine HAVE_STRINGS_H
+
+//Defined if include file "string.h" exists.
+#cmakedefine HAVE_STRING_H
+
+//Defined if function "strrchr" exists.
+#cmakedefine HAVE_STRRCHR
+
+//Defined if function "strtol" exists.
+#cmakedefine HAVE_STRTOL
+
+//Defined if include file "sys/stat.h" exists.
+#cmakedefine HAVE_SYS_STAT_H
+
+//Defined if include file "sys/types.h" exists.
+#cmakedefine HAVE_SYS_TYPES_H
+
+//Defined if include file "unistd.h" exists.
+#cmakedefine HAVE_UNISTD_H
+
+//Defined if include file "windows.h" exists.
+#cmakedefine HAVE_WINDOWS_H
+
+//Defined if type "_Bool" exists.
+#cmakedefine HAVE__BOOL
