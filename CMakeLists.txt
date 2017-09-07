@@ -63,6 +63,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/shared/config_cmake.h.in ${CMAKE_
 
 #Build the application!
 add_executable(gpx ${source_files})
+target_link_libraries(gpx m) #Math library.
 
 #Installation.
 include(GNUInstallDirs)
