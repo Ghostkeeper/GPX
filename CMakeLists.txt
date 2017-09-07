@@ -1,6 +1,13 @@
 project(GPX)
 cmake_minimum_required(VERSION 3.2.3) #Only version it's tested with.
 
+#Project metadata.
+set(PACKAGE_NAME GPX CACHE STRING "The full name of this package.")
+set(PACKAGE_VERSION 2.6.0 CACHE STRING "The version of this package.")
+set(PACKAGE_BUGREPORT "https://github.com/markwal/GPX/issues" CACHE STRING "The address where bug reports for this package should be sent.")
+set(PACKAGE_URL "https://github.com/markwal/GPX" CACHE STRING "The home page for this package.")
+set(PACKAGE_TARNAME gpx CACHE STRING "The one symbol short name of this package.")
+
 #Where to find the source code.
 set(source_files
 	src/gpx/gpx-main.c
