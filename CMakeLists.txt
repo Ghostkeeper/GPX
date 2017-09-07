@@ -19,8 +19,6 @@ set(source_files
 	src/shared/opt.c
 	src/shared/s3g.c
 	src/shared/s3g_stdio.c
-	src/utils/machines.c
-	src/utils/s3gdump.c
 )
 set(header_directories
 	src
