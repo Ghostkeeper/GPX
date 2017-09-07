@@ -14,12 +14,14 @@ set(source_files
 	src/gpx/gpx.c
 	src/gpx/gpxresp.c
 	src/gpx/vector.c
-	src/gpx/winsio.c
 	src/shared/machine_config.c
 	src/shared/opt.c
 	src/shared/s3g.c
 	src/shared/s3g_stdio.c
 )
+if(WIN32)
+	list(APPEND source_files src/gpx/winsio.c)
+endif()
 set(header_directories
 	src
 	src/gpx
