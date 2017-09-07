@@ -62,6 +62,7 @@ check_type_size(_Bool HAVE__BOOL)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/shared/config_cmake.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
 #Build the application!
+set(CMAKE_C_FLAGS "-DSERIAL_SUPPORT")
 add_executable(gpx ${source_files})
 target_link_libraries(gpx m) #Math library.
 
