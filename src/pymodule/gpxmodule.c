@@ -32,6 +32,15 @@ static PyObject *pyerrBufferOverflow;
 static PyObject *pyerrTimeout;
 static PyObject *pyerrUnknownFirmware;
 
+#if PY_MAJOR_VERSION >= 3
+const char *PyBytes_AsStringOrNull(PyObject *pyobj)
+{
+    if (pyobj == NULL)
+        return NULL;
+    return PyBytes_AsString(pyobj);
+}
+#endif
+
 static void clear_state_for_cancel(void)
 {
     tio_clear_state_for_cancel(tio);
@@ -117,8 +126,20 @@ static PyObject *py_connect(PyObject *self, PyObject *args)
     const char *logpath = NULL;
     int verbose = 0;
 
+#if PY_MAJOR_VERSION < 3
     if (!PyArg_ParseTuple(args, "s|lssi", &port, &baudrate, &inipath, &logpath, &verbose))
         return NULL;
+#else
+    PyObject *pyobj_port = NULL;
+    PyObject *pyobj_inipath = NULL;
+    PyObject *pyobj_logpath = NULL;
+
+    if (!PyArg_ParseTuple(args, "O&|lO&O&i", PyUnicode_FSConverter, &pyobj_port, &baudrate, PyUnicode_FSConverter, &pyobj_inipath, PyUnicode_FSConverter, &pyobj_logpath, &verbose))
+        return NULL;
+    port = PyBytes_AsStringOrNull(pyobj_port);
+    inipath = PyBytes_AsStringOrNull(pyobj_inipath);
+    logpath = PyBytes_AsStringOrNull(pyobj_logpath);
+#endif
 
     tio_cleanup(tio);
     connected = 1;
@@ -156,6 +177,15 @@ static PyObject *py_connect(PyObject *self, PyObject *args)
     }
 
     int rval = gpx_connect(&gpx, port, baudrate);
+#if PY_MAJOR_VERSION >= 3
+    if (pyobj_port != NULL)
+        Py_DECREF(pyobj_port);
+    if (pyobj_inipath != NULL)
+        Py_DECREF(pyobj_inipath);
+    if (pyobj_logpath != NULL)
+        Py_DECREF(pyobj_logpath);
+#endif
+    tio->sio.flag.shortRetryBufferOverflowOnly = 1;
     switch (rval) {
         case ESIOBADBAUD:
             PyErr_SetString(PyExc_ValueError, "Unsupported baudrate");
@@ -199,13 +229,15 @@ static PyObject *py_start(PyObject *self, PyObject *args)
 // def write(data)
 static PyObject *py_write(PyObject *self, PyObject *args)
 {
-    char *line;
+    Py_buffer pybuf;
+    const char *line;
 
     if (!connected)
         return PyErr_NotConnected();
 
-    if (!PyArg_ParseTuple(args, "s", &line))
+    if (!PyArg_ParseTuple(args, "s*", &pybuf))
         return NULL;
+    line = (const char *)pybuf.buf;
 
     tio->cur = 0;
     tio->translation[0] = 0;
@@ -213,6 +245,7 @@ static PyObject *py_write(PyObject *self, PyObject *args)
     tio->flag.okPending = !tio->waiting;
     PyObject *rval = py_write_string(line);
     tio->flag.okPending = 0;
+    PyBuffer_Release(&pybuf);
     return rval;
 }
 
@@ -337,13 +370,18 @@ static PyObject *py_disconnect(PyObject *self, PyObject *args)
 // for example: machine_info = get_machine_defaults("r1d")
 static PyObject *py_get_machine_defaults(PyObject *self, PyObject *args)
 {
-    char *machine_type_id;
+    Py_buffer pybuf;
+    const char *machine_type_id;
 
-    if (!PyArg_ParseTuple(args, "s", &machine_type_id))
+    if (!PyArg_ParseTuple(args, "s*", &pybuf))
         return NULL;
+    machine_type_id = (const char *)pybuf.buf;
 
     Machine *machine = gpx_find_machine(machine_type_id);
+    machine_type_id = NULL;
+    PyBuffer_Release(&pybuf);
     fflush(gpx.log);
+
     if (machine == NULL) {
         PyErr_SetString(PyExc_ValueError, "Machine id not found");
         return NULL;
@@ -388,20 +426,29 @@ static PyObject *py_get_machine_defaults(PyObject *self, PyObject *args)
 // def read_ini(ini_filepath)
 static PyObject *py_read_ini(PyObject *self, PyObject *args)
 {
+    Py_buffer pybuf;
     const char *inipath = NULL;
 
-    if (!PyArg_ParseTuple(args, "s", &inipath))
+    if (!PyArg_ParseTuple(args, "s*", &pybuf))
         return NULL;
+    inipath = (const char *)pybuf.buf;
 
     int lineno = gpx_load_config(&gpx, inipath);
-    if (lineno == 0)
+
+    if (lineno == 0) {
+        inipath = NULL;
+        PyBuffer_Release(&pybuf);
         return Py_BuildValue("i", 0); // success
+    }
 
     if (lineno < 0)
         fprintf(gpx.log, "Unable to load configuration file (%s)\n", inipath);
     if (lineno > 0)
         fprintf(gpx.log, "(line %u) Configuration syntax error in %s: unrecognized parameters\n", lineno, inipath);
     fflush(gpx.log);
+
+    inipath = NULL;
+    PyBuffer_Release(&pybuf);
 
     PyErr_SetString(PyExc_ValueError, "Unable to load ini file");
     return Py_BuildValue("i", 0);
@@ -564,9 +611,7 @@ static PyObject *py_stop(PyObject *self, PyObject *args)
     // first, ask if we are SD printing
     // delay 1ms is a queuable command that will fail if SD printing
     int sdprinting = 0;
-    tio->sio.flag.retryBufferOverflow = 1;
     rval = delay(&gpx, 1);
-    tio->sio.flag.retryBufferOverflow = 0;
     if (rval == 0x8A) // SD printing
         sdprinting = 1;
     // ignore any other response
@@ -640,12 +685,17 @@ static PyObject *py_read_eeprom(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    char *id;
-    if (!PyArg_ParseTuple(args, "s", &id))
+    const char *id;
+    Py_buffer pybuf;
+    if (!PyArg_ParseTuple(args, "s*", &pybuf))
         return NULL;
+    id = (const char *)pybuf.buf;
 
     if (gpx.flag.verboseMode) fprintf(gpx.log, "py_read_eeprom %s\n", id);
     EepromMapping *pem = find_any_eeprom_mapping(&gpx, id);
+    id = NULL;
+    PyBuffer_Release(&pybuf);
+
     if (pem == NULL) {
         PyErr_SetString(PyExc_ValueError, "EEPROM id mapping not found");
         return NULL;
@@ -714,21 +764,27 @@ static PyObject *py_write_eeprom(PyObject *self, PyObject *args)
     tio->cur = 0;
     tio->translation[0] = 0;
 
-    char *id;
+    const char *id;
+    Py_buffer pybuf;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "sO", &id, &value))
+    if (!PyArg_ParseTuple(args, "s*O", &pybuf, &value))
         return NULL;
+    id = (const char*)pybuf.buf;
+
     PyObject_Print(value, gpx.log, 0);
     fprintf(gpx.log, " <- \n");
 
     if (gpx.flag.verboseMode) fprintf(gpx.log, "py_write_eeprom\n");
     if (gpx.eepromMap == NULL && load_eeprom_map(&gpx) != SUCCESS) {
         PyErr_SetString(pyerrUnknownFirmware, "No EEPROM map found for firmware type and/or version");
+        PyBuffer_Release(&pybuf);
         return NULL;
     }
 
     EepromMapping *pem = find_any_eeprom_mapping(&gpx, id);
+    id = NULL;
+    PyBuffer_Release(&pybuf);
     if (pem == NULL) {
         PyErr_SetString(PyExc_ValueError, "EEPROM id mapping not found");
         return NULL;
@@ -752,7 +808,7 @@ static PyObject *py_write_eeprom(PyObject *self, PyObject *args)
 
         case et_bitfield:
         case et_byte:
-            value = PyNumber_Int(value);
+            value = PyNumber_Long(value);
             if (value == NULL)
                 return NULL;
             f = PyArg_Parse(value, "B", &b);
@@ -764,7 +820,7 @@ static PyObject *py_write_eeprom(PyObject *self, PyObject *args)
             break;
 
         case et_ushort:
-            value = PyNumber_Int(value);
+            value = PyNumber_Long(value);
             if (value == NULL)
                 return NULL;
             f = PyArg_Parse(value, "H", &us);
@@ -867,14 +923,10 @@ static PyMethodDef GpxMethods[] = {
     {NULL, NULL, 0, NULL} // sentinel
 };
 
-__attribute__ ((visibility ("default"))) PyMODINIT_FUNC initgpx(void);
-
-// python calls init<modulename> when the module is loaded
-PyMODINIT_FUNC initgpx(void)
+static PyObject *init_gpx_module(PyObject *m)
 {
-    PyObject *m = Py_InitModule("gpx", GpxMethods);
     if (m == NULL)
-        return;
+        return NULL;
 
     pyerrCancelBuild = PyErr_NewException("gpx.CancelBuild", NULL, NULL);
     Py_INCREF(pyerrCancelBuild);
@@ -894,4 +946,37 @@ PyMODINIT_FUNC initgpx(void)
 
     gpx_initialize(&gpx, 1);
     tio = tio_initialize(&gpx);
+    return m;
 }
+
+#if PY_MAJOR_VERSION < 3
+// python calls init<modulename> when the module is loaded
+__attribute__ ((visibility ("default"))) PyMODINIT_FUNC initgcodex3g(void);
+
+PyMODINIT_FUNC initgcodex3g(void)
+{
+    PyObject *m = Py_InitModule("gcodex3g", GpxMethods);
+
+    init_gpx_module(m);
+}
+#else
+__attribute__ ((visibility ("default"))) PyMODINIT_FUNC PyInit_gcodex3g(void);
+
+PyMODINIT_FUNC PyInit_gcodex3g(void)
+{
+    static struct PyModuleDef moduledef = {
+        PyModuleDef_HEAD_INIT,
+        "gcodex3g",
+        "Translates between gcode and x3g protocols",
+        -1,
+        GpxMethods,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+    };
+    PyObject *m = PyModule_Create(&moduledef);
+
+    return init_gpx_module(m);
+}
+#endif

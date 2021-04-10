@@ -156,9 +156,12 @@ int gpx_set_property(Gpx *gpx, const char* section, const char* property, char* 
 
 int gpx_set_machine(Gpx *gpx, const char *machine_type, int init)
 {
+    VERBOSE( fprintf(gpx->log, "gpx_set_machine: %s" EOL, machine_type) );
     Machine *machine = gpx_find_machine(machine_type);
-    if(machine == NULL)
+    if(machine == NULL) {
         return ERROR;
+        VERBOSE( fprintf(gpx->log, "gpx_set_machine FAILED to find: %s" EOL, machine_type) );
+    }
 
     // only load/clobber the on-board machine definition if the one specified is differenti
     // or if we're initializing
@@ -2718,7 +2721,7 @@ int load_eeprom_map(Gpx *gpx)
     return ERROR;
 }
 
-static int find_in_eeprom_map(EepromMap *map, char *name)
+static int find_in_eeprom_map(EepromMap *map, const char *name)
 {
     EepromMapping *pem = map->eepromMappings;
     int iem;
@@ -2730,7 +2733,7 @@ static int find_in_eeprom_map(EepromMap *map, char *name)
 }
 
 // find an eeprom mapping entry from the builtin mapping table
-static int find_builtin_eeprom_mapping(Gpx *gpx, char *name)
+static int find_builtin_eeprom_mapping(Gpx *gpx, const char *name)
 {
     if(gpx->eepromMap == NULL)
         return -1;
@@ -2739,7 +2742,7 @@ static int find_builtin_eeprom_mapping(Gpx *gpx, char *name)
 }
 
 // find an existing EEPROM mapping
-static int find_eeprom_mapping(Gpx *gpx, char *name)
+static int find_eeprom_mapping(Gpx *gpx, const char *name)
 {
     if(gpx->eepromMappingVector == NULL)
         return -1;
@@ -2789,7 +2792,7 @@ static int add_eeprom_mapping(Gpx *gpx, char *name, EepromType et, unsigned addr
     return vector_append(gpx->eepromMappingVector, &em);
 }
 
-EepromMapping *find_any_eeprom_mapping(Gpx *gpx, char *name)
+EepromMapping *find_any_eeprom_mapping(Gpx *gpx, const char *name)
 {
     if(!gpx->flag.sioConnected || gpx->sio == NULL) {
         gcodeResult(gpx, "(line %u) Error: eeprom operation without serial connection\n", gpx->lineNumber);
@@ -3921,12 +3924,16 @@ static char* find_char_or_comment(const char* s, char c)
 }
 
 /* Version of strncpy that ensures dest (size bytes) is null-terminated. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
+/* that warning warns against exactly what we're fixing here */
 static char* strncpy0(char* dest, const char* src, size_t size)
 {
     strncpy(dest, src, size);
     dest[size - 1] = '\0';
     return dest;
 }
+#pragma GCC diagnostic pop
 
 /* See documentation in header file. */
 static int ini_parse_file(Gpx* gpx, FILE* file, int (*handler)(Gpx*, const char*, const char*, char*))
@@ -4092,6 +4099,10 @@ int gpx_parse_steps_per_mm_all_axes(Gpx *gpx, char *parm);
 int gpx_set_property_inner(Gpx *gpx, const char* section, const char* property, char* value)
 {
     int rval;
+    if(strcasecmp(value, "None") == 0) {
+        gcodeResult(gpx, "(line %u) Configuration error: Ignoring configuration value '%s'" EOL, gpx->lineNumber, value);
+        return gpx->lineNumber;
+    }
     if(SECTION_IS("") || SECTION_IS("macro")) {
         if(PROPERTY_IS("slicer")
            || PROPERTY_IS("filament")
@@ -6208,7 +6219,7 @@ static void read_query_response(Gpx *gpx, Sio *sio, unsigned command, char *buff
             sio->response.sd.status = read_8(gpx);
             /* 1+N bytes: Name of the next file, in ASCII, terminated with a null character.
                           If the operation was unsuccessful, this will be a null character */
-            strncpy0(sio->response.sd.filename, gpx->buffer.ptr, 65);
+            strncpy0(sio->response.sd.filename, gpx->buffer.ptr, PROTOCOL_FILENAME_MAX);
             VERBOSE( fprintf(gpx->log, "Get next filename: '%s' %s" EOL,
                         sio->response.sd.filename,
                         get_sd_status(sio->response.sd.status)) );
@@ -6217,7 +6228,7 @@ static void read_query_response(Gpx *gpx, Sio *sio, unsigned command, char *buff
             // 20 - Get build name
         case 20:
             // 1+N bytes: A null terminated string representing the filename of the current build.
-            strncpy0(sio->response.sd.filename, gpx->buffer.ptr, 65);
+            strncpy0(sio->response.sd.filename, gpx->buffer.ptr, PROTOCOL_FILENAME_MAX);
             VERBOSE( fprintf(gpx->log, "Get build name: '%s'" EOL, sio->response.sd.filename) );
             break;
 

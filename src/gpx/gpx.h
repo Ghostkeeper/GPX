@@ -34,11 +34,13 @@ extern "C" {
 #include <limits.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <time.h>
 #include "vector.h"
 #include "config.h"
 
 #if defined(SERIAL_SUPPORT)
 #if !defined(_WIN32) && !defined(_WIN64)
+#define _DARWIN_C_SOURCE
 #include <termios.h>
 #else
 #include "winsio.h"
@@ -248,6 +250,8 @@ typedef long speed_t;
 
 #define BUFFER_MAX 1023
 
+#define PROTOCOL_FILENAME_MAX 65
+
     // GPX CONTEXT
 
     typedef struct tGpx Gpx;
@@ -432,7 +436,7 @@ typedef long speed_t;
 
             struct {
                 unsigned int length;
-                char filename[65];
+                char filename[PROTOCOL_FILENAME_MAX];
                 unsigned char status;
             } sd;
 
@@ -579,6 +583,7 @@ typedef long speed_t;
         Tr bed_tr;
         Gpx *gpx;
         int upstream;
+        time_t secWaitForClearCancel;
     } Tio;
 
     // 23 - Get build statistics: build state values
@@ -675,7 +680,7 @@ typedef long speed_t;
     void long_sleep(time_t sec);
 
 #ifdef __eeprominfo_h__
-    EepromMapping *find_any_eeprom_mapping(Gpx *, char *name);
+    EepromMapping *find_any_eeprom_mapping(Gpx *, const char *name);
 #endif
 #ifdef __cplusplus
 }

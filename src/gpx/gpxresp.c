@@ -27,19 +27,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <strings.h>
 #include <string.h>
-#include <time.h>
 #include <errno.h>
-#ifdef HAVE_POLL_H
-#include <poll.h>
-#endif
 #ifndef _WIN32
 #include <sys/select.h>
 #endif
 
 #include "gpx.h"
+
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
+#ifdef HAVE_ICONV
+#include <iconv.h>
+#endif
 
 // make a new string table
 // cs_chunk -- count of strings -- grow the string array in chunks of this many strings
@@ -197,7 +202,7 @@ void tio_clear_state_for_cancel(Tio *tio)
     if (tio->waiting) {
         tio->flag.waitClearedByCancel = 1;
         if(tio->gpx->flag.verboseMode)
-            fprintf(tio->gpx->log, "setting waitClearedByCancel");
+            fprintf(tio->gpx->log, "setting waitClearedByCancel\n");
     }
     tio->waiting = 0;
     tio->waitflag.waitForEmptyQueue = 1;
@@ -302,6 +307,39 @@ static void translate_extruder_query_response(Gpx *gpx, Tio *tio, unsigned query
     }
 }
 
+// Sailfish can return non-ASCII filenames and currently many hosts
+// expect the protocol to be ASCII. The correct solution here would be to
+// decode using the correct codepage and then teach the hosts how to deal with
+// UTF-8
+// FUTURE proper decode here (to UTF8?)
+static void sanitize_filename(char *filename)
+{
+#ifdef HAVE_ICONV
+    char buf[PROTOCOL_FILENAME_MAX];
+    iconv_t cd = iconv_open("WINDOWS-1252", "ASCII//TRANSLIT");
+    size_t inremain = strlen(filename);
+    size_t outremain = sizeof(buf) - 1;
+    char *in = filename;
+    char *out = buf;
+
+    size_t result = iconv(cd, &in, &inremain, &out, &outremain);
+    iconv_close(cd);
+    if (result >= 0) {
+        *out = 0;
+        strncpy(filename, buf, PROTOCOL_FILENAME_MAX);
+        filename[sizeof(buf) - 1] = 0;
+        return;
+    }
+    // fallthrough to strip
+#endif
+
+    for (; *filename; filename++) {
+        if (*filename < 32) {
+            *filename = '-';
+        }
+    }
+}
+
 // translate_handler
 // Callback function for gpx_convert_and_send.  It's where we translate the
 // s3g/x3g response into a text response that mimics a reprap printer.
@@ -390,10 +428,17 @@ static int translate_handler(Gpx *gpx, Tio *tio, char *buffer, size_t length)
             // 07 - Abort immediately
         case 7:
             // 17 - reset
-        case 17:
+        case 17: {
+            struct timespec ts;
+
             tio_clear_state_for_cancel(tio);
             tio->waitflag.waitForBotCancel = 1;
+            tio->secWaitForClearCancel = 0;
+            if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+                tio->secWaitForClearCancel = ts.tv_sec;
+            }
             break;
+        }
 
             // 10 - Extruder (tool) query response
         case 10: {
@@ -461,6 +506,7 @@ static int translate_handler(Gpx *gpx, Tio *tio, char *buffer, size_t length)
                     tio->flag.listingFiles = 0;
                 }
                 else {
+                    sanitize_filename(tio->sio.response.sd.filename);
                     tio_printf(tio, "%s", tio->sio.response.sd.filename);
                     sttb_add(&tio->sttb, tio->sio.response.sd.filename);
                 }
@@ -604,7 +650,7 @@ static int translate_handler(Gpx *gpx, Tio *tio, char *buffer, size_t length)
             if ((gpx->command.flag & M_IS_SET) && gpx->command.m == 115) {
                 // protocol version means the version of the RepRap protocol we're emulating
                 // not the version of the x3g protocol we're talking
-                tio_printf(tio, " PROTOCOL_VERSION:0.1 FIRMWARE_NAME:%s FIRMWARE_VERSION:%u.%u FIRMWARE_URL:%s MACHINE_TYPE:%s EXTRUDER_COUNT:%u",
+                tio_printf(tio, " PROTOCOL_VERSION:0.1 FIRMWARE_NAME:%s FIRMWARE_VERSION:%u.%u FIRMWARE_URL:%s MACHINE_TYPE:%s EXTRUDER_COUNT:%u\nCap:EMERGENCY_PARSER:1",
                         variant, tio->sio.response.firmware.version / 100, tio->sio.response.firmware.version %100,
                         variant_url, gpx->machine.type, gpx->machine.extruder_count);
             }
@@ -670,6 +716,7 @@ static int translate_handler(Gpx *gpx, Tio *tio, char *buffer, size_t length)
 static int translate_result(Gpx *gpx, Tio *tio, const char *fmt, va_list ap)
 {
     int len = 0;
+    VERBOSE( fprintf(gpx->log, "translate_result: %s\n", fmt) );
     if (!strcasecmp(fmt, "@clear_cancel")) {
         if (tio->upstream == -1 && !tio->flag.cancelPending && gpx->flag.programState == RUNNING_STATE) {
             // cancel gcode came through before cancel event
@@ -679,6 +726,7 @@ static int translate_result(Gpx *gpx, Tio *tio, const char *fmt, va_list ap)
         else {
             tio->waitflag.waitForEmptyQueue = 1;
         }
+        VERBOSE( fprintf(gpx->log, "clear cancelPending\n") );
         tio->flag.cancelPending = 0;
         return 0;
     }
@@ -840,7 +888,8 @@ int gpx_write_string_core(Gpx *gpx, const char *s)
     if (waiting && gpx->flag.verboseMode)
         fprintf(gpx->log, "waiting in gpx_write_string\n");
 
-    strncpy(gpx->buffer.in, s, sizeof(gpx->buffer.in));
+    strncpy(gpx->buffer.in, s, sizeof(gpx->buffer.in) - 1);
+    gpx->buffer.in[sizeof(gpx->buffer.in) - 1] = 0;
     int rval = gpx_convert_line(gpx, gpx->buffer.in);
 
     if (gpx->flag.verboseMode)
@@ -893,17 +942,25 @@ speed_t speed_from_long(long *baudrate)
             speed=B28800;
             break;
 #endif
+#ifdef B38400
         case 38400:
             speed=B38400;
             break;
+#endif
+#ifdef B57600
         case 57600:
             speed=B57600;
             break;
+#endif
             // TODO auto detect speed when 0?
         case 0: // 0 means default of 115200
             *baudrate=115200;
         case 115200:
+#ifdef B115200
             speed=B115200;
+#else
+            speed=115200;
+#endif
             break;
         default:
             tio_log_printf(&tio, "Error: Unsupported baud rate '%ld'\n", *baudrate);
@@ -926,8 +983,20 @@ int gpx_do_wait(Gpx *gpx)
         if (rval == SUCCESS && (tio.waitflag.waitForEmptyQueue || tio.waitflag.waitForButton))
             rval = is_ready(gpx);
         if (rval == SUCCESS && !tio.waitflag.waitForEmptyQueue) {
-            if (tio.waitflag.waitForStart || tio.waitflag.waitForBotCancel)
+            if (tio.waitflag.waitForStart || tio.waitflag.waitForBotCancel) {
+                struct timespec ts;
+
+                if (tio.secWaitForClearCancel && clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+                    if ((tio.secWaitForClearCancel - ts.tv_sec) > 5) {
+                        tio.secWaitForClearCancel = ts.tv_sec;
+                        tio.cur = 0;
+                        tio_printf(&tio, "// echo: GPX forcing an ok due to timeout waiting for clear_cancel");
+                        tio_printf(&tio, "ok");
+                        return SUCCESS;
+                    }
+                }
                 rval = get_build_statistics(gpx);
+            }
             if (rval == SUCCESS && tio.waitflag.waitForPlatform)
                 rval = is_build_platform_ready(gpx, 0);
             if (rval == SUCCESS && tio.waitflag.waitForExtruderA)
@@ -1024,6 +1093,16 @@ static int gpx_create_daemon_port(Gpx *gpx, const char *daemon_port)
     }
     fprintf(gpx->log, "Created virtual port: %s.\n", pn);
 
+    // get the perms on the slave end
+    struct stat st;
+    if (stat(pn, &st) == -1) {
+        fprintf(gpx->log, "Warn: Unable to retrieve permissions on psuedo-terminal %s. errno = %d\n", pn, errno);
+    }
+    // set the perms on the slave end
+    else if (chmod(pn, st.st_mode | S_IRGRP)) {
+        fprintf(gpx->log, "Warn: Unable to set permissions on psuedo-terminal %s. errno = %d\n", pn, errno);
+    }
+
     // create the requested "daemon_port" as a symlink to the slave end
     if (unlink(daemon_port) < 0 && errno != ENOENT) {
         fprintf(gpx->log, "Error: %s already exists and can't be removed. errno = %d\n", daemon_port, errno);
@@ -1082,7 +1161,7 @@ static int wait_for_hup_clear(Gpx *gpx, int fd)
         short_sleep(250000000L);
     }
     if (send_ok) {
-        tio_printf("ok");
+        tio_printf(&tio, "ok");
         gpx_write_upstream_translation(gpx);
     }
     return SUCCESS;

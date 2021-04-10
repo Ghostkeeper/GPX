@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([gpx], [2.5.3], [https://github.com/markwal/GPX/issues],,[https://github.com/markwal/GPX])
+AC_INIT([gpx], [2.6.8], [https://github.com/markwal/GPX/issues],,[https://github.com/markwal/GPX])
 AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AM_MAINTAINER_MODE([disable])
@@ -42,6 +42,7 @@ AC_CHECK_PROG([DIFF], [diff], [diff -b])
 AM_CONDITIONAL([HAVE_DIFF], [test -n "$DIFF"])
 
 # Checks for libraries.
+AM_ICONV
 
 # Checks for header files.
 AC_CHECK_HEADERS([fcntl.h float.h inttypes.h limits.h stdint.h stdlib.h string.h unistd.h poll.h])
